@@ -32,7 +32,7 @@ param(
 # Auto-update: every check downloads update.json (blocker.ps1 + its signature) from the public updates repo and
 # installs it only if the RSA signature matches this key and the version is newer.
 # publish.ps1 bumps this version and signs with the private key, which never leaves the publisher's PC.
-$ScriptVersion = 202610112234
+$ScriptVersion = 202610112258
 $UpdateBaseUrl = 'https://raw.githubusercontent.com/Abdullah-Habashy/porn-blocker-updates/main'
 $UpdatePublicKey = '<RSAKeyValue><Modulus>1oBFE+xZMQ+A+c1a1SDzdZ6OikvOyNgzppMkdHkIPjbXRog/t9LCd+6AR31CdRGJbqycDAgtOROiyG+mTFiYZ/L64rySUvEPRiQIMzKCgfXT3hU5t1lE+8IWmL7MlkapsXvJhHcXLBV4yn3g3pDTlTN/7eFemM9c/tE4XF164DjtNAhUPN7XharGNnz3dr2j4Atcc1g2pJsl4HN3U01g9eMGSOtwxjia6bbgqu1PxvQn6nzDqFveOfimU9iQJPjCHyHlJq82XUBLkxhPHXgHFptVd6Sm6Rq96n7eU1eutEmDBcaW8TGj1M5lYY9/b5yevsg/hz+MsnUROHDPQo/zowEiUM3s7pOygEeVKYxgHHi6D8CqO8ooDNx4BhaugVme5MSvdudPenB4uuSZUwJx+sEhMgyJIo3zThqCBW5ONjilCD63RztnXEwTWqrugUSr+eLoI8U46GcOpvxiwmKiWAm5n6Gl/Inp2K+wU36nfZOB3Vg1l1/sEd7C+AldSpsJ</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
 
@@ -91,7 +91,12 @@ $GuardPolicies = @(
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'TorDisabled', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'BraveVPNDisabled', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox\Proxy', 'Mode', 'none', 'String'),
-    @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox\Proxy', 'Locked', 1, 'DWord')
+    @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox\Proxy', 'Locked', 1, 'DWord'),
+    # No incognito / InPrivate / private windows (1 = disabled), so the history stays visible
+    @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'IncognitoModeAvailability', 1, 'DWord'),
+    @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'InPrivateModeAvailability', 1, 'DWord'),
+    @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'IncognitoModeAvailability', 1, 'DWord'),
+    @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox', 'DisablePrivateBrowsing', 1, 'DWord')
 )
 
 # SafeSearch for every browser, including Firefox and Opera that have no policy for it: hosts
