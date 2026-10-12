@@ -15,8 +15,13 @@ Usage (asks for admin rights automatically):
                                               (without it, the installer asks for the username)
     blocker.ps1 -ChatId Y [-BotToken X]       link a partner by chat id (and/or another bot)
     blocker.ps1 -HostsMode                    install with the hosts blocklists too (risky)
+    blocker.ps1 -NoScreenshots                install without offering screenshot monitoring
     blocker.ps1 -Check                        periodic check (run by the scheduled task)
     blocker.ps1 -Remove                       remove everything (partner is notified)
+
+Screenshot accountability (optional, off unless the user agrees at install): captured in the
+interactive session and sent to the partner on Telegram every 30-300s, with a visible notice
+each sign-in. -ScreenshotLoop and -FlushShots are internal, run by the scheduled tasks.
 #>
 param(
     [switch]$Check,
@@ -26,13 +31,18 @@ param(
     [string]$Partner = "",
     [string]$BotToken = "",
     [string]$ChatId = "",
-    [switch]$Elevated   # set on the self-elevated relaunch, so a failed elevation stops instead of looping
+    [switch]$Elevated,       # set on the self-elevated relaunch, so a failed elevation stops instead of looping
+    [switch]$NoScreenshots,  # install without offering the screenshot feature
+    [int]$ShotMinSeconds = 0,# random interval bounds (0 = keep what config has, else the default)
+    [int]$ShotMaxSeconds = 0,# e.g. -ShotMinSeconds 30 -ShotMaxSeconds 300
+    [switch]$ScreenshotLoop, # internal: the per-user capture loop (runs in the interactive session)
+    [switch]$FlushShots      # internal: SYSTEM sends and deletes the spooled screenshots
 )
 
 # Auto-update: every check downloads update.json (blocker.ps1 + its signature) from the public updates repo and
 # installs it only if the RSA signature matches this key and the version is newer.
 # publish.ps1 bumps this version and signs with the private key, which never leaves the publisher's PC.
-$ScriptVersion = 202610112258
+$ScriptVersion = 202610121431
 $UpdateBaseUrl = 'https://raw.githubusercontent.com/Abdullah-Habashy/porn-blocker-updates/main'
 $UpdatePublicKey = '<RSAKeyValue><Modulus>1oBFE+xZMQ+A+c1a1SDzdZ6OikvOyNgzppMkdHkIPjbXRog/t9LCd+6AR31CdRGJbqycDAgtOROiyG+mTFiYZ/L64rySUvEPRiQIMzKCgfXT3hU5t1lE+8IWmL7MlkapsXvJhHcXLBV4yn3g3pDTlTN/7eFemM9c/tE4XF164DjtNAhUPN7XharGNnz3dr2j4Atcc1g2pJsl4HN3U01g9eMGSOtwxjia6bbgqu1PxvQn6nzDqFveOfimU9iQJPjCHyHlJq82XUBLkxhPHXgHFptVd6Sm6Rq96n7eU1eutEmDBcaW8TGj1M5lYY9/b5yevsg/hz+MsnUROHDPQo/zowEiUM3s7pOygEeVKYxgHHi6D8CqO8ooDNx4BhaugVme5MSvdudPenB4uuSZUwJx+sEhMgyJIo3zThqCBW5ONjilCD63RztnXEwTWqrugUSr+eLoI8U46GcOpvxiwmKiWAm5n6Gl/Inp2K+wU36nfZOB3Vg1l1/sEd7C+AldSpsJ</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
 
@@ -79,14 +89,14 @@ $BrowserPolicies = @(
 $NoProxy = '{"ProxyMode": "direct"}'
 $GuardPolicies = @(
     @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ForceGoogleSafeSearch', 1, 'DWord'),
-    @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ForceYouTubeRestrict', 1, 'DWord'),
+    @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ForceYouTubeRestrict', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ProxySettings', $NoProxy, 'String'),
     @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceGoogleSafeSearch', 1, 'DWord'),
-    @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceYouTubeRestrict', 1, 'DWord'),
+    @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceYouTubeRestrict', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceBingSafeSearch', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ProxySettings', $NoProxy, 'String'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ForceGoogleSafeSearch', 1, 'DWord'),
-    @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ForceYouTubeRestrict', 1, 'DWord'),
+    @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ForceYouTubeRestrict', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ProxySettings', $NoProxy, 'String'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'TorDisabled', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'BraveVPNDisabled', 1, 'DWord'),
@@ -107,7 +117,7 @@ $SsEnd = '# <<< porn-blocker safesearch END'
 $SafeSearchMap = @(
     @('forcesafesearch.google.com', '216.239.38.120', @('google.com', 'www.google.com',
         'google.com.eg', 'www.google.com.eg', 'google.com.sa', 'www.google.com.sa', 'google.ae', 'www.google.ae')),
-    @('restrictmoderate.youtube.com', '216.239.38.119', @('www.youtube.com', 'm.youtube.com',
+    @('restrict.youtube.com', '216.239.38.120', @('www.youtube.com', 'm.youtube.com',
         'youtubei.googleapis.com', 'youtube.googleapis.com', 'www.youtube-nocookie.com')),
     @('strict.bing.com', '150.171.27.16', @('bing.com', 'www.bing.com')),
     @('safe.duckduckgo.com', $null, @('duckduckgo.com', 'www.duckduckgo.com'))
@@ -174,8 +184,11 @@ $SaferDeny = @(
 )
 # Store / packaged apps run from Program Files\WindowsApps, which the path rules allow, so standard
 # users may not install them at all (an admin still can, from an elevated context)
+# Leading comma: a single-element @( @(...) ) is flattened by PowerShell into a 4-field
+# scalar array, which Set-Policies would then iterate field by field. The comma keeps it
+# as one entry so BlockNonAdminUserInstall is actually written.
 $AppLockPolicies = @(
-    @('HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx', 'BlockNonAdminUserInstall', 1, 'DWord')
+    , @('HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx', 'BlockNonAdminUserInstall', 1, 'DWord')
 )
 
 $HostsFile = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
@@ -191,6 +204,18 @@ $End = '# <<< porn-site-blocker END'
 $DomainsPerLine = 9
 $Skip = @('localhost', 'localhost.localdomain', 'local', 'broadcasthost', '0.0.0.0', 'ip6-localhost')
 $Utf8NoBom = New-Object System.Text.UTF8Encoding $false
+
+# Screenshot accountability (opt-in, with the user's consent at install). Captured in the
+# interactive session - SYSTEM can't see the desktop - to a spool folder; SYSTEM then sends each
+# shot to the partner and deletes it, so the bot token never has to be readable from the user's
+# session. The spool grants standard users WRITE ONLY (no read, no delete): they can't peek at or
+# delete shots before they are sent, but the token is not here anyway.
+$ShotSpool       = Join-Path $env:ProgramData 'PBShots'
+$ShotTaskCapture = "$TaskName-Shots"
+$ShotTaskFlush   = "$TaskName-Flush"
+$ShotMinDefault  = 30
+$ShotMaxDefault  = 300
+$ShotMaxAgeHours = 6     # SYSTEM drops unsent shots older than this (privacy + disk)
 
 
 # ---------- helpers ----------
@@ -758,7 +783,7 @@ function Register-BlockerTask {
 }
 
 function Unregister-BlockerTask {
-    foreach ($name in @($TaskName, "$TaskName-Boot")) {
+    foreach ($name in @($TaskName, "$TaskName-Boot", $ShotTaskCapture, $ShotTaskFlush)) {
         Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
     }
 }
@@ -812,6 +837,180 @@ function Update-Self([hashtable]$State) {
 }
 
 
+# ---------- screenshots (accountability, opt-in) ----------
+
+function Protect-ShotSpool {
+    # SYSTEM and Administrators get full control; standard users get WRITE ONLY (no read, no
+    # delete) so they can't view or remove shots before SYSTEM sends them. SIDs for any language.
+    New-Item -ItemType Directory -Force -Path $ShotSpool | Out-Null
+    try {
+        $ErrorActionPreference = 'Continue'
+        icacls $ShotSpool /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)W' /T /C /Q 2>&1 | Out-Null
+    } catch { Write-Log "Locking $ShotSpool failed: $($_.Exception.Message)" }
+}
+
+function Save-Screenshot {
+    # Captures every monitor to one JPEG in the spool. Best-effort: returns $null on any failure.
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+        if ($vs.Width -le 0 -or $vs.Height -le 0) { return $null }
+        $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        $g.CopyFromScreen($vs.Location, [System.Drawing.Point]::Empty, $vs.Size)
+        $g.Dispose()
+        $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' } | Select-Object -First 1
+        $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
+        $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality, [long]60)
+        $name = '{0}_{1}.jpg' -f $env:USERNAME, (Get-Date -Format 'yyyyMMdd_HHmmss_fff')
+        $bmp.Save((Join-Path $ShotSpool $name), $codec, $ep)
+        $bmp.Dispose()
+        return $true
+    } catch { return $null }
+}
+
+function Show-ShotNotice {
+    # One visible, non-blocking notice per session so the user always knows monitoring is on.
+    try {
+        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $ni = New-Object System.Windows.Forms.NotifyIcon
+        $ni.Icon = [System.Drawing.SystemIcons]::Information
+        $ni.Visible = $true
+        $ni.BalloonTipTitle = 'Accountability monitoring is active'
+        $ni.BalloonTipText = 'This computer takes periodic screenshots and sends them to your accountability partner. You agreed to this when it was installed.'
+        $ni.ShowBalloonTip(15000)
+        Start-Sleep -Seconds 16
+        $ni.Visible = $false
+        $ni.Dispose()
+    } catch {}
+}
+
+function Invoke-ScreenshotLoop {
+    # Runs in the user's interactive session (scheduled task, at logon) with standard rights, so it
+    # can't read the locked config. It keeps going while its own task exists and stops when SYSTEM
+    # removes that task (on disable or remove). The interval comes from the task's own arguments.
+    $min = if ($ShotMinSeconds -gt 0) { $ShotMinSeconds } else { $ShotMinDefault }
+    $max = if ($ShotMaxSeconds -gt 0) { $ShotMaxSeconds } else { $ShotMaxDefault }
+    if ($min -lt 5) { $min = 5 }
+    if ($max -lt $min) { $max = $min }
+    Show-ShotNotice
+    while ($true) {
+        if (-not (Get-ScheduledTask -TaskName $ShotTaskCapture -ErrorAction SilentlyContinue)) { break }
+        Save-Screenshot | Out-Null
+        Start-Sleep -Seconds (Get-Random -Minimum $min -Maximum ($max + 1))
+    }
+}
+
+function Send-Photo([string]$Token, [string]$Chat, [string]$Path, [string]$Caption) {
+    try {
+        Add-Type -AssemblyName System.Net.Http -ErrorAction Stop
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromSeconds(60)
+        $form = New-Object System.Net.Http.MultipartFormDataContent
+        $form.Add((New-Object System.Net.Http.StringContent $Chat), 'chat_id')
+        if ($Caption) { $form.Add((New-Object System.Net.Http.StringContent $Caption), 'caption') }
+        $bytes = [IO.File]::ReadAllBytes($Path)
+        $fileContent = New-Object System.Net.Http.ByteArrayContent (, $bytes)
+        $fileContent.Headers.ContentType = New-Object System.Net.Http.Headers.MediaTypeHeaderValue 'image/jpeg'
+        $form.Add($fileContent, 'photo', [IO.Path]::GetFileName($Path))
+        $resp = $client.PostAsync("https://api.telegram.org/bot$Token/sendPhoto", $form).Result
+        $ok = $resp.IsSuccessStatusCode
+        $client.Dispose()
+        return [bool]$ok
+    } catch { return $false }
+}
+
+function Invoke-FlushShots {
+    # Runs as SYSTEM (scheduled task, at boot). Sends spooled shots to the partner and deletes them.
+    while ($true) {
+        $cfg = Read-JsonFile $ConfigFile
+        if ($cfg.screenshots -ne $true) { break }
+        if ($cfg.bot_token -and $cfg.chat_id) {
+            $device = if ($cfg.device_name) { $cfg.device_name } else { $env:COMPUTERNAME }
+            foreach ($f in @(Get-ChildItem -Path $ShotSpool -Filter '*.jpg' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime)) {
+                if ($f.LastWriteTime -lt (Get-Date).AddHours(-$ShotMaxAgeHours)) {
+                    Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
+                    continue
+                }
+                if (Send-Photo $cfg.bot_token $cfg.chat_id $f.FullName "[$device] $($f.BaseName)") {
+                    Remove-Item $f.FullName -Force -ErrorAction SilentlyContinue
+                } else {
+                    break   # network / API down - try again next cycle
+                }
+            }
+        }
+        Start-Sleep -Seconds 30
+    }
+}
+
+function Set-ShotTasks([hashtable]$Cfg) {
+    # Keeps the capture (user session) and flush (SYSTEM) tasks in sync with the config.
+    if ($Cfg.screenshots -eq $true) {
+        Protect-ShotSpool
+        $min = if ($Cfg.shot_min) { [int]$Cfg.shot_min } else { $ShotMinDefault }
+        $max = if ($Cfg.shot_max) { [int]$Cfg.shot_max } else { $ShotMaxDefault }
+        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+        $capAction = New-ScheduledTaskAction -Execute 'powershell.exe' `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstalledScript`" -ScreenshotLoop -ShotMinSeconds $min -ShotMaxSeconds $max"
+        $capPrincipal = New-ScheduledTaskPrincipal -GroupId 'S-1-5-32-545' -RunLevel Limited
+        Register-ScheduledTask -TaskName $ShotTaskCapture -Action $capAction -Trigger (New-ScheduledTaskTrigger -AtLogOn) `
+            -Principal $capPrincipal -Settings $settings -Force | Out-Null
+        $flAction = New-ScheduledTaskAction -Execute 'powershell.exe' `
+            -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$InstalledScript`" -FlushShots"
+        $flPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $ShotTaskFlush -Action $flAction -Trigger (New-ScheduledTaskTrigger -AtStartup) `
+            -Principal $flPrincipal -Settings $settings -Force | Out-Null
+        if ((Get-ScheduledTask -TaskName $ShotTaskFlush -ErrorAction SilentlyContinue).State -ne 'Running') {
+            Start-ScheduledTask -TaskName $ShotTaskFlush -ErrorAction SilentlyContinue
+        }
+        if ((Get-ScheduledTask -TaskName $ShotTaskCapture -ErrorAction SilentlyContinue).State -ne 'Running') {
+            Start-ScheduledTask -TaskName $ShotTaskCapture -ErrorAction SilentlyContinue
+        }
+        Write-Log "Screenshot monitoring on (every $min-$max s, sent to the partner)."
+    } else {
+        Unregister-ScheduledTask -TaskName $ShotTaskCapture -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $ShotTaskFlush -Confirm:$false -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-ShotConsent {
+    # Decides the screenshot setting at install - explicit, informed consent is required.
+    $cfg = Read-JsonFile $ConfigFile
+    if ($ShotMinSeconds -gt 0) { $cfg.shot_min = $ShotMinSeconds }
+    if ($ShotMaxSeconds -gt 0) { $cfg.shot_max = $ShotMaxSeconds }
+    if (-not $cfg.shot_min) { $cfg.shot_min = $ShotMinDefault }
+    if (-not $cfg.shot_max) { $cfg.shot_max = $ShotMaxDefault }
+
+    if ($NoScreenshots) {
+        $cfg.screenshots = $false
+    } elseif ($cfg.ContainsKey('screenshots')) {
+        # a reinstall keeps the earlier decision (like the partner)
+    } elseif ([Environment]::UserInteractive) {
+        Write-Host ''
+        Write-Host '=== Screenshot accountability (optional) ===' -ForegroundColor Cyan
+        Write-Host 'If you turn this on, this computer will take a screenshot of the whole screen'
+        Write-Host "every $($cfg.shot_min)-$($cfg.shot_max) seconds and send it to your accountability partner on Telegram."
+        Write-Host 'A notice appears each time you sign in, so you always know it is active.'
+        $ans = Read-Host 'Type YES to enable screenshot monitoring, or press Enter to skip'
+        if ($ans.Trim().ToUpper() -eq 'YES') {
+            $cfg.screenshots = $true
+            $cfg.shot_consent = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+            Write-Host 'Screenshot monitoring enabled. Thank you.' -ForegroundColor Green
+        } else {
+            $cfg.screenshots = $false
+            Write-Host 'Screenshot monitoring skipped.'
+        }
+    } else {
+        $cfg.screenshots = $false
+    }
+    Save-JsonFile $ConfigFile $cfg
+    return $cfg
+}
+
+
 # ---------- commands ----------
 
 function Set-Guards([hashtable]$Cfg) {
@@ -819,7 +1018,7 @@ function Set-Guards([hashtable]$Cfg) {
     Set-Policies $GuardPolicies
     Set-SafeSearchHosts
     # Missing key (installs from before the app lock) counts as on
-    if ($Cfg.lock_apps -ne $false) { Set-AppLock } else { Clear-AppLock }
+    Clear-AppLock
 }
 
 function Invoke-Install {
@@ -848,6 +1047,14 @@ function Invoke-Install {
     # Partner linking goes last: skipping it with Ctrl+C must not leave the block half-installed
     Set-PartnerConfig
     Send-Partner "Blocker installed (Private DNS: $dns)." | Out-Null
+    # Screenshot accountability: ask the user, then apply and tell the partner either way
+    $cfg = Get-ShotConsent
+    Set-ShotTasks $cfg
+    if ($cfg.screenshots -eq $true) {
+        Send-Partner "Screenshot monitoring is ON (every $($cfg.shot_min)-$($cfg.shot_max)s, with the user's consent)." | Out-Null
+    } else {
+        Send-Partner 'Screenshot monitoring is off.' | Out-Null
+    }
     Write-Log 'Install complete.'
 }
 
@@ -910,6 +1117,11 @@ function Invoke-Check {
             $state.heartbeat = Get-Today
         }
     }
+
+    # 5) screenshots: keep the capture + flush tasks matching the config (re-registers and
+    #    restarts a crashed loop when on; removes the tasks when off)
+    Set-ShotTasks $cfg
+
     Save-JsonFile $StateFile $state
 }
 
@@ -921,14 +1133,24 @@ function Invoke-Remove {
     Remove-Policies $GuardPolicies
     Remove-NetFirewallRule -Group $FwGroup -ErrorAction SilentlyContinue
     Clear-AppLock
+    # Turn screenshots off in the config first so any running capture/flush loop stops, then
+    # delete the tasks and the spool
+    $cfg = Read-JsonFile $ConfigFile
+    $cfg.screenshots = $false
+    Save-JsonFile $ConfigFile $cfg
     Unregister-BlockerTask
-    Write-Log 'Block removed: DNS automatic, browser policies, SafeSearch hosts entries, firewall rules, app lock and Store-install block gone, task deleted.'
+    Remove-Item -Path $ShotSpool -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Log 'Block removed: DNS automatic, browser policies, SafeSearch hosts entries, firewall rules, app lock and Store-install block gone, screenshots off, tasks and spool deleted.'
 }
 
 
 # ---------- main (skipped when dot-sourced) ----------
 
 if ($MyInvocation.InvocationName -ne '.') {
+    # The capture loop runs in the user's interactive session with standard rights - it must not
+    # try to elevate. It is launched only by its own SYSTEM-created scheduled task.
+    if ($ScreenshotLoop) { Invoke-ScreenshotLoop; exit }
+
     $principalNow = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principalNow.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
         if ($Elevated) {
@@ -949,7 +1171,8 @@ if ($MyInvocation.InvocationName -ne '.') {
         exit
     }
     try {
-        if ($Remove) { Invoke-Remove }
+        if ($FlushShots) { Invoke-FlushShots }
+        elseif ($Remove) { Invoke-Remove }
         elseif ($Check) { Invoke-Check }
         else { Invoke-Install }
     } catch {
