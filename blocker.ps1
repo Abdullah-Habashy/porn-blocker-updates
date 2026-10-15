@@ -42,7 +42,7 @@ param(
 # Auto-update: every check downloads update.json (blocker.ps1 + its signature) from the public updates repo and
 # installs it only if the RSA signature matches this key and the version is newer.
 # publish.ps1 bumps this version and signs with the private key, which never leaves the publisher's PC.
-$ScriptVersion = 202610121431
+$ScriptVersion = 202610160047
 $UpdateBaseUrl = 'https://raw.githubusercontent.com/Abdullah-Habashy/porn-blocker-updates/main'
 $UpdatePublicKey = '<RSAKeyValue><Modulus>1oBFE+xZMQ+A+c1a1SDzdZ6OikvOyNgzppMkdHkIPjbXRog/t9LCd+6AR31CdRGJbqycDAgtOROiyG+mTFiYZ/L64rySUvEPRiQIMzKCgfXT3hU5t1lE+8IWmL7MlkapsXvJhHcXLBV4yn3g3pDTlTN/7eFemM9c/tE4XF164DjtNAhUPN7XharGNnz3dr2j4Atcc1g2pJsl4HN3U01g9eMGSOtwxjia6bbgqu1PxvQn6nzDqFveOfimU9iQJPjCHyHlJq82XUBLkxhPHXgHFptVd6Sm6Rq96n7eU1eutEmDBcaW8TGj1M5lYY9/b5yevsg/hz+MsnUROHDPQo/zowEiUM3s7pOygEeVKYxgHHi6D8CqO8ooDNx4BhaugVme5MSvdudPenB4uuSZUwJx+sEhMgyJIo3zThqCBW5ONjilCD63RztnXEwTWqrugUSr+eLoI8U46GcOpvxiwmKiWAm5n6Gl/Inp2K+wU36nfZOB3Vg1l1/sEd7C+AldSpsJ</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
 
@@ -83,30 +83,40 @@ $BrowserPolicies = @(
     @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox\DNSOverHTTPS', 'Locked', 1, 'DWord')
 )
 
-# Browser policies that stay on even when DNS fails open: SafeSearch / YouTube Restricted Mode,
+# Browser policies that stay on even when DNS fails open: SafeSearch,
 # no proxy (so proxy-based "VPN" extensions stop working), and Brave's built-in Tor and VPN off.
 # Edge Secure Network (its built-in VPN) has no policy - Edge turns it off once any policy is set.
 $NoProxy = '{"ProxyMode": "direct"}'
 $GuardPolicies = @(
     @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ForceGoogleSafeSearch', 1, 'DWord'),
-    @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ForceYouTubeRestrict', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ProxySettings', $NoProxy, 'String'),
     @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceGoogleSafeSearch', 1, 'DWord'),
-    @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceYouTubeRestrict', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceBingSafeSearch', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ProxySettings', $NoProxy, 'String'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ForceGoogleSafeSearch', 1, 'DWord'),
-    @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ForceYouTubeRestrict', 2, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ProxySettings', $NoProxy, 'String'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'TorDisabled', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'BraveVPNDisabled', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox\Proxy', 'Mode', 'none', 'String'),
     @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox\Proxy', 'Locked', 1, 'DWord'),
+    # ForceYouTubeRestrict used to be here. YouTube's Restricted Mode hides the
+    # comments of every video at both levels, which made YouTube unreadable, so
+    # it was dropped on 13 October 2026. SafeSearch, the host block, the DNS
+    # filter and the rest are untouched. See $RetiredPolicies below: installed
+    # copies clear the leftover value on their next run.
     # No incognito / InPrivate / private windows (1 = disabled), so the history stays visible
     @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'IncognitoModeAvailability', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'InPrivateModeAvailability', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'IncognitoModeAvailability', 1, 'DWord'),
     @('HKLM:\SOFTWARE\Policies\Mozilla\Firefox', 'DisablePrivateBrowsing', 1, 'DWord')
+)
+
+# Values an older version used to set and this one does not. Every run deletes them, so an
+# existing install drops them on its next check instead of carrying them for ever.
+$RetiredPolicies = @(
+    @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'ForceYouTubeRestrict'),
+    @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'ForceYouTubeRestrict'),
+    @('HKLM:\SOFTWARE\Policies\BraveSoftware\Brave', 'ForceYouTubeRestrict')
 )
 
 # SafeSearch for every browser, including Firefox and Opera that have no policy for it: hosts
@@ -117,8 +127,11 @@ $SsEnd = '# <<< porn-blocker safesearch END'
 $SafeSearchMap = @(
     @('forcesafesearch.google.com', '216.239.38.120', @('google.com', 'www.google.com',
         'google.com.eg', 'www.google.com.eg', 'google.com.sa', 'www.google.com.sa', 'google.ae', 'www.google.ae')),
-    @('restrict.youtube.com', '216.239.38.120', @('www.youtube.com', 'm.youtube.com',
-        'youtubei.googleapis.com', 'youtube.googleapis.com', 'www.youtube-nocookie.com')),
+    # The YouTube line pointed www.youtube.com at restrict.youtube.com, which forces Restricted
+    # Mode for every browser at the network level - the same feature as the ForceYouTubeRestrict
+    # policy, enforced a second way. Both were dropped on 13 October 2026 because Restricted Mode
+    # hides the comments of every video. Google SafeSearch and Bing below are untouched, and the
+    # next run rewrites the hosts block without the YouTube names.
     @('strict.bing.com', '150.171.27.16', @('bing.com', 'www.bing.com')),
     @('safe.duckduckgo.com', $null, @('duckduckgo.com', 'www.duckduckgo.com'))
 )
@@ -189,6 +202,28 @@ $SaferDeny = @(
 # as one entry so BlockNonAdminUserInstall is actually written.
 $AppLockPolicies = @(
     , @('HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx', 'BlockNonAdminUserInstall', 1, 'DWord')
+)
+
+# Content Guard: the browser extension that reads the ADDRESS AND THE TEXT of every page and
+# takes the page away when it matches keywords.txt. It is the only layer that can block an
+# article about the subject sitting on an ordinary domain - DNS sees host names, hosts needs
+# exact names, and Chromium's URLBlocklist has no substring matching at all (*xample.com is
+# not even a valid pattern), so no other layer here can see a word inside a page.
+#
+# Force-installed through policy, which is also what stops the monitored user switching it
+# off: Chrome, Edge and Brave all refuse to let anyone remove a force-installed extension.
+#
+# The ID is derived from the signing key in %USERPROFILE%\.porn-blocker\extension_key.pem and
+# is printed by build-extension.ps1. A new key means a new ID, and then this policy silently
+# installs nothing - which is why that key must be backed up and never regenerated.
+$ExtensionId = 'hfdidmojdonclaiggdckfiijfannodbb'
+$ExtensionUpdateUrl = 'https://raw.githubusercontent.com/Abdullah-Habashy/porn-blocker-updates/main/content-guard-updates.xml'
+# Each vendor keeps its forcelist as numbered string values under its own key, so the value
+# name is '1' rather than the single named value the other policies use.
+$ExtensionForcelistKeys = @(
+    'HKLM:\SOFTWARE\Policies\Google\Chrome\ExtensionInstallForcelist',
+    'HKLM:\SOFTWARE\Policies\Microsoft\Edge\ExtensionInstallForcelist',
+    'HKLM:\SOFTWARE\Policies\BraveSoftware\Brave\ExtensionInstallForcelist'
 )
 
 $HostsFile = Join-Path $env:SystemRoot 'System32\drivers\etc\hosts'
@@ -440,6 +475,61 @@ function Disable-DnsFirewallRule {
     # Fail-open: automatic DNS (the router) must be reachable on port 53
     foreach ($proto in @('TCP', 'UDP')) {
         Disable-NetFirewallRule -Name "$FwDnsRule-$proto" -ErrorAction SilentlyContinue
+    }
+}
+
+function Set-ContentGuard {
+    # Writes the forcelist entry for each browser. Only the one value is touched, so another
+    # force-installed extension already listed by someone else keeps its slot.
+    foreach ($key in $ExtensionForcelistKeys) {
+        try {
+            if (-not (Test-Path $key)) { New-Item -Path $key -Force | Out-Null }
+            New-ItemProperty -Path $key -Name '1' -Value "$ExtensionId;$ExtensionUpdateUrl" `
+                -PropertyType String -Force | Out-Null
+        } catch {
+            Write-Log "Content Guard policy $key failed: $($_.Exception.Message)"
+        }
+    }
+}
+
+function Test-ContentGuard {
+    # The policy can read as perfectly correct while the extension does not exist anywhere.
+    # It is installed FROM A URL, and a URL that answers 404 installs nothing - silently. That
+    # is exactly what happened between 14 October and 15 October 2026: every forcelist value was
+    # in place, every log line was clean, and no browser had the extension at all, so no page
+    # text was ever filtered. Setting the policy is therefore not evidence that it works.
+    #
+    # So this asks the only question that matters: would a browser following this policy
+    # actually get the extension? Returns $null when it cannot tell, which is not the same as
+    # a failure and must not raise an alarm.
+    if (-not (Test-NetworkUp)) { return $null }
+    try {
+        $r = Invoke-WebRequest -Uri $ExtensionUpdateUrl -UseBasicParsing -TimeoutSec 20
+        if ([int]$r.StatusCode -ne 200) { return "the update manifest answered $([int]$r.StatusCode)." }
+        $xml = "$($r.Content)"
+        if ($xml -notmatch [regex]::Escape($ExtensionId)) {
+            return "the update manifest does not mention extension id $ExtensionId - the signing key changed, so the policy installs nothing."
+        }
+        $codebase = [regex]::Match($xml, "codebase='([^']+)'").Groups[1].Value
+        if (-not $codebase) { return 'the update manifest has no codebase address.' }
+        # The manifest can be published while the package beside it is not.
+        $crx = Invoke-WebRequest -Uri $codebase -UseBasicParsing -TimeoutSec 40
+        if ([int]$crx.StatusCode -ne 200) { return "the extension package answered $([int]$crx.StatusCode)." }
+        if ($crx.RawContentLength -lt 1000) { return "the extension package is only $($crx.RawContentLength) bytes." }
+    } catch {
+        return "the extension could not be fetched: $($_.Exception.Message)"
+    }
+    return ''   # empty string = all well
+}
+
+function Clear-ContentGuard {
+    foreach ($key in $ExtensionForcelistKeys) {
+        # Only remove the value if it is ours: on a managed PC someone else's extension may
+        # be sitting in slot 1, and deleting that would be sabotage rather than cleanup.
+        $v = (Get-ItemProperty -Path $key -Name '1' -ErrorAction SilentlyContinue).'1'
+        if ($v -and $v -like "$ExtensionId;*") {
+            Remove-ItemProperty -Path $key -Name '1' -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -708,6 +798,27 @@ function Write-SafeSearchHosts([string[]]$Outside, [string[]]$Section) {
     ipconfig /flushdns | Out-Null
 }
 
+function Remove-RetiredSafeSearchLines([string[]]$Section) {
+    # Drops lines for names this version no longer manages - which is how the YouTube
+    # Restricted Mode entries leave a machine that an older version already wrote them to.
+    #
+    # This cannot wait for the normal rewrite below: that one gives up early whenever a
+    # lookup fails, and keeps the existing section exactly as it is. On a PC that is offline
+    # at every check, or whose DNS failed open, "no longer written" would have meant
+    # "pinned to restrict.youtube.com for ever".
+    $managed = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($m in $SafeSearchMap) { foreach ($n in $m[2]) { [void]$managed.Add($n) } }
+    $keep = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($line in $Section) {
+        # A hosts line is "<ip> <name> [name...]"
+        $names = @(($line -split '\s+' | Where-Object { $_ }) | Select-Object -Skip 1)
+        $stillManaged = @($names | Where-Object { $managed.Contains($_) })
+        # Keep the line if any of its names is still ours; drop it only when all of them are retired
+        if ($names.Count -eq 0 -or $stillManaged.Count -gt 0) { $keep.Add($line) }
+    }
+    return $keep.ToArray()
+}
+
 function Get-SafeSearchLines {
     $lines = New-Object 'System.Collections.Generic.List[string]'
     $allResolved = $true
@@ -734,6 +845,13 @@ function Set-SafeSearchHosts {
         $r = Get-SafeSearchLines
         $lines = $r.Lines
         $h = Read-SafeSearchHosts
+        # Retired names go first and unconditionally, before the early return below
+        $cleaned = Remove-RetiredSafeSearchLines $h.Section
+        if ($cleaned.Count -ne $h.Section.Count) {
+            Write-SafeSearchHosts $h.Outside $cleaned
+            Write-Log "Removed $($h.Section.Count - $cleaned.Count) retired SafeSearch hosts line(s) - YouTube Restricted Mode is no longer forced."
+            $h = Read-SafeSearchHosts
+        }
         # A failed lookup (offline, DNS failing open) keeps the entries already there; fallback IPs only fill an empty section
         if (-not $r.AllResolved -and $h.Section.Count -gt 0) { return }
         if ($lines.Count -eq 0 -or ($h.Section -join "`n") -ceq ($lines -join "`n")) { return }
@@ -1016,6 +1134,11 @@ function Get-ShotConsent {
 function Set-Guards([hashtable]$Cfg) {
     # The parts that don't depend on DNS working, so they stay on through fail-open
     Set-Policies $GuardPolicies
+    # Policies this version no longer sets: cleared so a machine that was set up by an older
+    # version does not keep them forever (nothing here was ever set by anything else).
+    Remove-Policies $RetiredPolicies
+    # Keyword filtering of the page text itself, through the force-installed extension
+    Set-ContentGuard
     Set-SafeSearchHosts
     # Missing key (installs from before the app lock) counts as on
     Clear-AppLock
@@ -1111,6 +1234,25 @@ function Invoke-Check {
         }
     }
 
+    # 3b) the keyword / YouTube filter must actually be installable, not merely configured
+    $guard = Test-ContentGuard
+    if ($null -eq $guard) {
+        # no network: nothing was learned, so nothing is claimed
+    } elseif ($guard -eq '') {
+        $state.guard_fails = 0
+    } else {
+        $state.guard_fails = [int]$state.guard_fails + 1
+        Write-Log "Content Guard not available: $guard (consecutive failures: $($state.guard_fails))"
+        # Two checks in a row, so one flaky hour is not an alarm, but a real outage still is.
+        if ([int]$state.guard_fails -ge 2 -and $state.guard_notified -ne (Get-Today)) {
+            if (Send-Partner ("ALERT: the page-content filter (keywords and the YouTube channel list) " +
+                    "is NOT installed on this device and cannot install itself: $guard " +
+                    "DNS filtering is unaffected, but page text is not being filtered.")) {
+                $state.guard_notified = Get-Today
+            }
+        }
+    }
+
     # 4) daily heartbeat to the partner
     if ($state.heartbeat -ne (Get-Today)) {
         if (Send-Partner "Blocker running (Private DNS: $dns).") {
@@ -1132,6 +1274,7 @@ function Invoke-Remove {
     Reset-PrivateDns
     Remove-Policies $GuardPolicies
     Remove-NetFirewallRule -Group $FwGroup -ErrorAction SilentlyContinue
+    Clear-ContentGuard
     Clear-AppLock
     # Turn screenshots off in the config first so any running capture/flush loop stops, then
     # delete the tasks and the spool
@@ -1140,7 +1283,7 @@ function Invoke-Remove {
     Save-JsonFile $ConfigFile $cfg
     Unregister-BlockerTask
     Remove-Item -Path $ShotSpool -Recurse -Force -ErrorAction SilentlyContinue
-    Write-Log 'Block removed: DNS automatic, browser policies, SafeSearch hosts entries, firewall rules, app lock and Store-install block gone, screenshots off, tasks and spool deleted.'
+    Write-Log 'Block removed: DNS automatic, browser policies, SafeSearch hosts entries, firewall rules, app lock and Store-install block gone, keyword extension unforced, screenshots off, tasks and spool deleted.'
 }
 
 
