@@ -42,7 +42,7 @@ param(
 # Auto-update: every check downloads update.json (blocker.ps1 + its signature) from the public updates repo and
 # installs it only if the RSA signature matches this key and the version is newer.
 # publish.ps1 bumps this version and signs with the private key, which never leaves the publisher's PC.
-$ScriptVersion = 202610160047
+$ScriptVersion = 202610160144
 $UpdateBaseUrl = 'https://raw.githubusercontent.com/Abdullah-Habashy/porn-blocker-updates/main'
 $UpdatePublicKey = '<RSAKeyValue><Modulus>1oBFE+xZMQ+A+c1a1SDzdZ6OikvOyNgzppMkdHkIPjbXRog/t9LCd+6AR31CdRGJbqycDAgtOROiyG+mTFiYZ/L64rySUvEPRiQIMzKCgfXT3hU5t1lE+8IWmL7MlkapsXvJhHcXLBV4yn3g3pDTlTN/7eFemM9c/tE4XF164DjtNAhUPN7XharGNnz3dr2j4Atcc1g2pJsl4HN3U01g9eMGSOtwxjia6bbgqu1PxvQn6nzDqFveOfimU9iQJPjCHyHlJq82XUBLkxhPHXgHFptVd6Sm6Rq96n7eU1eutEmDBcaW8TGj1M5lYY9/b5yevsg/hz+MsnUROHDPQo/zowEiUM3s7pOygEeVKYxgHHi6D8CqO8ooDNx4BhaugVme5MSvdudPenB4uuSZUwJx+sEhMgyJIo3zThqCBW5ONjilCD63RztnXEwTWqrugUSr+eLoI8U46GcOpvxiwmKiWAm5n6Gl/Inp2K+wU36nfZOB3Vg1l1/sEd7C+AldSpsJ</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>'
 
@@ -193,7 +193,26 @@ $SaferDeny = @(
     @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d23}', 'browser.exe', 'String'),
     @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d24}', 'UCBrowser.exe', 'String'),
     @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d25}', 'tor.exe', 'String'),
-    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d26}', 'psiphon3.exe', 'String')
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d26}', 'psiphon3.exe', 'String'),
+    # Gecko browsers, blocked for a different reason than the ones above: Content Guard is a
+    # Chromium extension, and ExtensionInstallForcelist exists only for Chrome, Edge and Brave.
+    # Firefox would need its own add-on, signed by Mozilla. So on Firefox the whole keyword
+    # filter and the YouTube allow list are simply absent - DNS, SafeSearch and private windows
+    # are locked there, and nothing reads the text of a page. A browser that is 90% covered is
+    # the one the user ends up in, so the family does not run for standard users at all.
+    #
+    # Tor Browser's own binary is firefox.exe, not tor.exe: the tor.exe rule above blocks the
+    # daemon, this one blocks the browser.
+    #
+    # The Firefox policies elsewhere in this script stay: administrators are exempt from the
+    # app lock, so an admin's Firefox is still locked down as far as policy can do it.
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d27}', 'firefox.exe', 'String'),
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d28}', 'librewolf.exe', 'String'),
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d29}', 'waterfox.exe', 'String'),
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d2a}', 'palemoon.exe', 'String'),
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d2b}', 'basilisk.exe', 'String'),
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d2c}', 'mullvadbrowser.exe', 'String'),
+    @('{8d3a3c0e-5b1f-4f6c-9a1e-0b6c2f1a7d2d}', 'seamonkey.exe', 'String')
 )
 # Store / packaged apps run from Program Files\WindowsApps, which the path rules allow, so standard
 # users may not install them at all (an admin still can, from an elevated context)
